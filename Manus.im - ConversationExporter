@@ -1,0 +1,126 @@
+(async function() {
+    console.log("🚀 Startuji vylepšenou archivaci konverzace...");
+
+    // Funkce pro nalezení skutečného scrollovacího elementu
+    const getScroller = () => {
+        // 1. Zkusíme známý kontejner
+        const simplebar = document.querySelector('.simplebar-content-wrapper');
+        if (simplebar && simplebar.scrollHeight > simplebar.clientHeight) return simplebar;
+
+        // 2. Najdeme element s největším scrollem
+        const all = document.querySelectorAll('*');
+        let best = null;
+        let max = 0;
+        all.forEach(el => {
+            if (el.scrollHeight > el.clientHeight && el.scrollHeight > max) {
+                const style = window.getComputedStyle(el);
+                if (style.overflowY !== 'hidden' && style.display !== 'none') {
+                    max = el.scrollHeight;
+                    best = el;
+                }
+            }
+        });
+        return best || window;
+    };
+
+    const scroller = getScroller();
+    const archive = new Map();
+    
+    console.log("📍 Identifikovaný scroller:", scroller === window ? "Window" : (scroller.className || scroller.tagName));
+
+    // Robustní funkce pro scroll na konkrétní pozici
+    const doScroll = (top) => {
+        if (scroller === window) {
+            window.scrollTo({ top: top, behavior: 'smooth' });
+        } else {
+            scroller.scrollTo({ top: top, behavior: 'smooth' });
+            // Záložní metoda pro SimpleBar a podobné
+            scroller.scrollTop = top;
+        }
+    };
+
+    // Funkce pro sběr zpráv
+    const harvest = () => {
+        document.querySelectorAll('.group').forEach(el => {
+            const isUser = el.classList.contains('items-end');
+            const who = isUser ? "UŽIVATEL" : "AI (Manus)";
+            
+            // Ignorujeme systémové lišty a tlačítka
+            if (el.querySelector('button') && el.innerText.length < 50) return;
+
+            let txt = "";
+            const mdContent = el.querySelector('.manus-markdown');
+            if (mdContent) {
+                txt = mdContent.innerText.trim();
+            } else {
+                // Klonování pro odstranění tlačítek
+                let clone = el.cloneNode(true);
+                clone.querySelectorAll('button, .flex.items-center.justify-between, .text-xs').forEach(r => r.remove());
+                txt = clone.innerText.trim();
+            }
+
+            if (txt && txt.length > 5 && !archive.has(txt)) {
+                archive.set(txt, `${who}:\n${txt}\n\n`);
+                console.log(`📥 [${archive.size}] ${who}: ${txt.substring(0, 30)}...`);
+            }
+        });
+    };
+
+    // 1. Vyjetí úplně nahoru (zkusíme několikrát)
+    console.log("⬆️ Vyjíždím na začátek...");
+    for (let i = 0; i < 3; i++) {
+        doScroll(0);
+        await new Promise(r => setTimeout(r, 800));
+    }
+
+    // 2. Postupné scrollování dolů
+    console.log("⬇️ Začínám plynulý sjezd a sběr dat...");
+    let currentPos = 0;
+    const scrollStep = 500;
+    let lastScrollTop = -1;
+    let stuckCount = 0;
+
+    while (true) {
+        harvest();
+        
+        currentPos += scrollStep;
+        doScroll(currentPos);
+        
+        await new Promise(r => setTimeout(r, 1000));
+
+        const actualTop = scroller === window ? window.scrollY : scroller.scrollTop;
+        console.log(`Posun: ${actualTop} / ${scroller.scrollHeight || '?'}`);
+
+        if (actualTop === lastScrollTop) {
+            stuckCount++;
+            if (stuckCount > 3) break; // Jsme na konci
+        } else {
+            stuckCount = 0;
+            lastScrollTop = actualTop;
+        }
+
+        // Pokud jsme už blízko konce
+        if (scroller.scrollHeight && actualTop + (scroller.clientHeight || window.innerHeight) >= scroller.scrollHeight - 10) {
+            harvest();
+            break;
+        }
+    }
+
+    console.log(`✅ Hotovo! Posbíráno ${archive.size} bloků textu.`);
+
+    // 3. Generování souboru
+    const title = document.title.split('-')[0].trim() || "Manus_Export";
+    const finalTxt = `ARCHIV KONVERZACE\n` + "=".repeat(40) + "\n\n" + 
+                     Array.from(archive.values()).join("-".repeat(20) + "\n\n");
+    
+    const blob = new Blob([finalTxt], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `manus_${title.replace(/\s+/g, '_')}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    
+    alert(`Archivace dokončena! Posbíráno ${archive.size} zpráv. Soubor byl stažen.`);
+})();
